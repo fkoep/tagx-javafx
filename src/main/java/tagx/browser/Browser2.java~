@@ -1,0 +1,199 @@
+package tagx.browser;
+
+import tagx.gallery.*;
+import org.apache.commons.lang3.StringUtils;
+import javafx.application.Application;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.collections.ListChangeListener.Change;
+import javafx.fxml.FXMLLoader;
+import javafx.fxml.FXML;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
+import javafx.scene.control.ListView;
+import javafx.scene.control.SelectionMode;
+import javafx.scene.control.TextField;
+import javafx.stage.Stage;
+import javafx.stage.FileChooser;
+import javafx.event.ActionEvent;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.Files;
+import static java.nio.file.StandardOpenOption.CREATE;
+import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
+import java.nio.file.OpenOption;
+import java.nio.charset.StandardCharsets;
+import java.io.File;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.stream.*;
+import java.util.*;
+
+public class Browser2 extends Application {
+    private Gallery gallery = new SimpleGallery();
+    
+    private Parent root;
+    private Scene scene;
+    private Stage stage;
+
+    @FXML
+    private TextField searchField;
+    private List<Entry> searchResults = new ArrayList<>();
+
+    @FXML
+    private ListView<String> contentView;
+    private ObservableList<String> contentEntries;
+    private ObservableList<String> contentEntriesSelected;
+
+    @FXML
+    private ListView<String> filterView;
+    private ObservableList<String> filterTags;
+    private ObservableList<String> filterTagsSelected;
+
+    @FXML
+    private ListView<String> detailView;
+    private ObservableList<String> detailTags;
+    private ObservableList<String> detailTagsSelected;
+
+    private static Set<String> collectTags(Stream<Entry> entries){
+        Set<String> tags = new TreeSet<>();
+        entries.forEach(e -> e.streamTags().forEach(tags::add));
+        return tags;
+    }
+
+    private Stream<Entry> toEntryStream(Stream<String> paths){
+        return paths.map(s -> gallery.getEntry(Paths.get(s)));
+    }
+
+    @FXML
+    public void onNewGallery(){
+        gallery = new SimpleGallery();
+        onSearch();
+    }
+
+    @FXML
+    public void onMergeGallery(){
+        FileChooser chooser = new FileChooser();
+        // TODO chooser.setTitle("Select Gallery");
+        File file = chooser.showOpenDialog(stage);
+        if (file == null) return;
+        try {
+            String json = String.join("\n", Files.readAllLines(file.toPath(), StandardCharsets.UTF_8));
+            gallery.mergeJson(json);
+        } catch (IOException e) {
+            // TODO
+            e.printStackTrace(System.out);
+        }
+    }
+
+    @FXML
+    public void onLoadGallery(){
+        onNewGallery();
+        onMergeGallery();
+    }
+
+    @FXML
+    public void onSaveGallery(){
+        FileChooser chooser = new FileChooser();
+        // TODO chooser.setTitle("Select Gallery");
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("TagX files (*.tagx)", "*.tagx"));
+        File file = chooser.showSaveDialog(stage);
+        if (file == null) return;
+
+        try {
+            Files.write(file.toPath(), gallery.toJson().getBytes(), CREATE, TRUNCATE_EXISTING);
+        } catch (IOException e) {
+            // TODO
+            e.printStackTrace(System.out);
+        }
+    }
+
+    @FXML
+    public void onSearch(){
+        String text = searchField.getText();
+        String[] query = text.trim().split("\\s+");
+        searchResults = gallery.streamEntries()
+                .filter(e -> (query.length == 0) || Stream.of(query).allMatch(q -> StringUtils.contains(e.getName(), q)))
+                .collect(Collectors.toList());
+        contentEntries.setAll(searchResults.stream()
+                .map(Entry::getPath)
+                .map(Path::toString)
+                .collect(Collectors.toList()));
+        filterTags.setAll(collectTags(toEntryStream(contentEntries.stream())));
+    }
+
+    @FXML
+    public void onFilterSelect(){
+        contentEntries.setAll(searchResults.stream()
+                .filter(e -> filterTagsSelected.stream().allMatch(e::hasTag))
+                .map(Entry::getPath)
+                .map(Path::toString)
+                .collect(Collectors.toList()));
+    }
+
+    @FXML
+    public void onContentSelect(){
+        detailTags.setAll(collectTags(toEntryStream(contentEntriesSelected.stream())));
+    }
+
+    @FXML
+    public void onAddEntries(){
+        FileChooser chooser = new FileChooser();
+        // TODO chooser.setTitle("Select Files");
+        List<File> files = chooser.showOpenMultipleDialog(stage);
+        for (File file : files) {
+            try {
+                gallery.addEntry(file.toPath());
+            } catch (IOException e) {
+                // TODO
+                e.printStackTrace(System.out);
+            }
+        }
+    }
+
+    @FXML
+    public void onRemoveEntries(){
+        contentEntriesSelected.stream()
+            .map(Paths::get)
+            .forEach(gallery::removeEntry);
+        onSearch();
+    }
+
+    @Override
+    public void start(Stage stage) throws IOException {
+        FXMLLoader loader = new FXMLLoader(getClass().getResource("/browser2.fxml"));
+        loader.setController(this);
+
+        this.root = loader.load();
+        this.scene = new Scene(root);
+        this.stage = stage;
+        stage.setTitle("tagX");
+        stage.setScene(scene);
+
+        this.contentEntries = contentView.getItems();
+        this.contentEntriesSelected = contentView.getSelectionModel().getSelectedItems();
+
+        this.filterTags = filterView.getItems();
+        this.filterTagsSelected = filterView.getSelectionModel().getSelectedItems();
+
+        this.detailTags = detailView.getItems();
+        this.detailTagsSelected = detailView.getSelectionModel().getSelectedItems();
+
+        filterTagsSelected.addListener((Change<? extends String> c) -> {
+            onFilterSelect();
+        });
+
+        contentEntriesSelected.addListener((Change<? extends String> c) -> {
+            onContentSelect();
+        });
+
+        stage.show();
+    }
+
+    public static void main(String[] args) {
+        launch(args);
+    }
+}
+
+
